@@ -1,103 +1,199 @@
-import Image from "next/image";
+"use client"
+
+import { useState, useEffect } from "react"
+import { ConnectionManager } from "@/components/connection-manager"
+import { Sidebar } from "@/components/sidebar"
+import { EndpointTester } from "@/components/endpoint-tester"
+import { ResponseViewer } from "@/components/response-viewer"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { LogOut } from "lucide-react"
+import type { UserContext, EndpointConfig, ApiResponse } from "@/types/wellview"
+
+const USER_CONTEXT_KEY = "wellview_user_context"
+const SELECTED_ORG_KEY = "wellview_selected_org"
+const SELECTED_APP_KEY = "wellview_selected_app"
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [userContext, setUserContext] = useState<UserContext | null>(null)
+  const [selectedEndpoint, setSelectedEndpoint] = useState<EndpointConfig | null>(null)
+  const [response, setResponse] = useState<ApiResponse | null>(null)
+  const [selectedOrgIndex, setSelectedOrgIndex] = useState(0)
+  const [selectedAppIndex, setSelectedAppIndex] = useState(0)
+  const [isLoading, setIsLoading] = useState(true)
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  // Load user context from sessionStorage on mount
+  useEffect(() => {
+    const savedContext = sessionStorage.getItem(USER_CONTEXT_KEY)
+    const savedOrgIndex = sessionStorage.getItem(SELECTED_ORG_KEY)
+    const savedAppIndex = sessionStorage.getItem(SELECTED_APP_KEY)
+
+    if (savedContext) {
+      try {
+        const parsed = JSON.parse(savedContext) as UserContext
+        setUserContext(parsed)
+        if (savedOrgIndex) setSelectedOrgIndex(Number.parseInt(savedOrgIndex))
+        if (savedAppIndex) setSelectedAppIndex(Number.parseInt(savedAppIndex))
+      } catch (error) {
+        console.error("Failed to parse saved user context:", error)
+        sessionStorage.removeItem(USER_CONTEXT_KEY)
+      }
+    }
+    setIsLoading(false)
+  }, [])
+
+  const handleConnect = (context: UserContext) => {
+    setUserContext(context)
+    // Save to sessionStorage
+    sessionStorage.setItem(USER_CONTEXT_KEY, JSON.stringify(context))
+    
+    // Pre-load library tables in the background for better UX
+    const firstOrg = context.organizations[0]
+    const firstApp = firstOrg?.applications[0]
+    if (firstOrg && firstApp && firstApp.header) {
+      // Trigger table loading in background (don't await, let it happen async)
+      fetch(
+        `/api/wellview/${firstOrg.name}/${firstApp.name}/library/tables?_appHeaderName=WellView&_appHeaderValue=${encodeURIComponent(firstApp.header)}`
+      ).catch(() => {
+        // Silently fail - tables will be loaded on-demand if this fails
+      })
+    }
+  }
+
+  const handleDisconnect = () => {
+    setUserContext(null)
+    setSelectedEndpoint(null)
+    setResponse(null)
+    setSelectedOrgIndex(0)
+    setSelectedAppIndex(0)
+    // Clear from sessionStorage
+    sessionStorage.removeItem(USER_CONTEXT_KEY)
+    sessionStorage.removeItem(SELECTED_ORG_KEY)
+    sessionStorage.removeItem(SELECTED_APP_KEY)
+  }
+
+  const handleOrgChange = (value: string) => {
+    const index = Number.parseInt(value)
+    setSelectedOrgIndex(index)
+    setSelectedAppIndex(0)
+    sessionStorage.setItem(SELECTED_ORG_KEY, index.toString())
+    sessionStorage.setItem(SELECTED_APP_KEY, "0")
+  }
+
+  const handleAppChange = (value: string) => {
+    const index = Number.parseInt(value)
+    setSelectedAppIndex(index)
+    sessionStorage.setItem(SELECTED_APP_KEY, index.toString())
+  }
+
+  // Show loading state while checking sessionStorage
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-center space-y-2">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
+          <p className="text-sm text-muted-foreground">Loading...</p>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </div>
+    )
+  }
+
+  const handleSelectEndpoint = (endpoint: EndpointConfig) => {
+    setSelectedEndpoint(endpoint)
+    setResponse(null)
+  }
+
+  if (!userContext) {
+    return <ConnectionManager onConnect={handleConnect} />
+  }
+
+  const currentOrg = userContext.organizations[selectedOrgIndex]
+  const currentApp = currentOrg?.applications[selectedAppIndex]
+
+  return (
+    <div className="flex h-screen flex-col">
+      {/* Header */}
+      <header className="flex items-center justify-between border-b bg-background px-6 py-4">
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-bold">WellView API Explorer</h1>
+          {userContext.organizations.length > 1 && (
+            <Select
+              value={selectedOrgIndex.toString()}
+              onValueChange={handleOrgChange}
+            >
+              <SelectTrigger className="w-[200px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {userContext.organizations.map((org, i) => (
+                  <SelectItem key={i} value={i.toString()}>
+                    {org.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {currentOrg && currentOrg.applications.length > 1 && (
+            <Select
+              value={selectedAppIndex.toString()}
+              onValueChange={handleAppChange}
+            >
+              <SelectTrigger className="w-[200px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {currentOrg.applications.map((app, i) => (
+                  <SelectItem key={i} value={i.toString()}>
+                    {app.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Connected as:</span>
+          <Badge variant="secondary">{userContext.username}</Badge>
+          <Badge className="bg-green-500">
+            <span className="mr-1.5 h-2 w-2 rounded-full bg-white" />
+            Connected
+          </Badge>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleDisconnect}
+            className="ml-2"
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Disconnect
+          </Button>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <div className="w-64">
+          <Sidebar selectedEndpoint={selectedEndpoint} onSelectEndpoint={handleSelectEndpoint} />
+        </div>
+
+        {/* Content Area */}
+        <div className="flex-1 overflow-auto">
+          <div className="container mx-auto space-y-6 p-6">
+            {selectedEndpoint && currentOrg ? (
+              <>
+                <EndpointTester endpoint={selectedEndpoint} userContext={userContext} onResponse={setResponse} />
+                <ResponseViewer response={response} />
+              </>
+            ) : (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                Select an endpoint from the sidebar to get started
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
-  );
+  )
 }
